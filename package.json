@@ -1,0 +1,45 @@
+{
+  "name": "mcpport",
+  "version": "0.1.0",
+  "description": "List, lint, sync and convert MCP server configs across Claude Code, Codex, Gemini CLI and Cursor",
+  "keywords": [
+    "mcp",
+    "model-context-protocol",
+    "claude-code",
+    "codex",
+    "gemini-cli",
+    "cursor",
+    "cli"
+  ],
+  "license": "MIT",
+  "author": "abdalkaderdev",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/Abdalkaderdev/mcpport.git"
+  },
+  "homepage": "https://github.com/Abdalkaderdev/mcpport#readme",
+  "bugs": "https://github.com/Abdalkaderdev/mcpport/issues",
+  "type": "module",
+  "bin": {
+    "mcpport": "dist/bin.js"
+  },
+  "files": [
+    "dist"
+  ],
+  "engines": {
+    "node": ">=22"
+  },
+  "scripts": {
+    "build": "tsc",
+    "test": "node --test \"src/**/*.test.ts\"",
+    "typecheck": "tsc --noEmit",
+    "prepublishOnly": "npm run typecheck && npm test && npm run build"
+  },
+  "dependencies": {
+    "smol-toml": "^1.9.0"
+  },
+  "devDependencies": {
+    "@types/node": "^24.19.1",
+    "typescript": "^7.0.2"
+  }
+}
