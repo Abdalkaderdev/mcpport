@@ -315,3 +315,11 @@ test("convert within one agent redacts nested secrets", () => {
   assert.ok(!text.includes(SECRET), text);
   assert.match(cli("convert", "g", "--from", "gemini", "--to", "codex").text, /bearer|url/);
 });
+
+test("--help prints usage and never runs the command", () => {
+  file(".claude.json", json({ a: { type: "stdio", command: "npx" } }));
+  const { code, text } = cli("sync", "claude", "cursor", "--apply", "--help");
+  assert.equal(code, 0);
+  assert.match(text, /Usage:/);
+  assert.ok(!existsSync(join(home, ".cursor/mcp.json")));
+});

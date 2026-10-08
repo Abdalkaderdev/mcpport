@@ -48,6 +48,11 @@ export function run(argv: string[], home = homedir(), print = console.log, env: 
   const agents = values.agent ? [getAgent(values.agent)] : AGENTS;
   const project = values.project;
 
+  if (values.help) {
+    out(HELP);
+    return 0;
+  }
+
   if (values.version) {
     out(createRequire(import.meta.url)("../package.json").version);
     return 0;
