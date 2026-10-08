@@ -1,4 +1,4 @@
-import { copyFileSync, mkdirSync, readFileSync, renameSync, writeFileSync } from "node:fs";
+import { copyFileSync, mkdirSync, readFileSync, realpathSync, renameSync, statSync, writeFileSync } from "node:fs";
 import { dirname } from "node:path";
 import { parse as parseToml, stringify as stringifyToml } from "smol-toml";
 import { canonical, parseDocument, stripComments, type Config, type Server } from "./config.ts";
@@ -69,8 +69,9 @@ export function writeServers(target: Config, entries: [string, Record<string, un
     backup = `${target.path}.${now.toISOString().replace(/[:.]/g, "-")}.bak`;
     copyFileSync(target.path, backup);
   } else mkdirSync(dirname(target.path), { recursive: true });
-  const tmp = `${target.path}.mcpport-tmp`;
-  writeFileSync(tmp, eol === "\n" ? next : next.replace(/\n/g, "\r\n"));
-  renameSync(tmp, target.path);
+  const path = target.exists ? realpathSync(target.path) : target.path;
+  const tmp = `${path}.mcpport-tmp`;
+  writeFileSync(tmp, eol === "\n" ? next : next.replace(/\n/g, "\r\n"), { mode: target.exists ? statSync(path).mode : 0o666 });
+  renameSync(tmp, path);
   return backup;
 }

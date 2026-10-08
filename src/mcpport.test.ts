@@ -1,5 +1,5 @@
 import assert from "node:assert/strict";
-import { existsSync, mkdirSync, mkdtempSync, readdirSync, readFileSync, writeFileSync } from "node:fs";
+import { existsSync, lstatSync, mkdirSync, mkdtempSync, readdirSync, readFileSync, statSync, symlinkSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
 import { beforeEach, test } from "node:test";
@@ -334,4 +334,22 @@ test("reads Gemini settings with comments and refuses to write them", () => {
   assert.equal(cli("lint", "--agent", "gemini").code, 0);
   assert.throws(() => cli("sync", "claude", "gemini", "--apply"), /comments/);
   assert.equal(read(".gemini/settings.json"), text);
+});
+
+test("writes through a symlinked config and keeps its permissions", (t) => {
+  const real = join(home, "dotfiles", "mcp.json");
+  mkdirSync(dirname(real), { recursive: true });
+  writeFileSync(real, json({}), { mode: 0o600 });
+  mkdirSync(join(home, ".cursor"));
+  try {
+    symlinkSync(real, join(home, ".cursor/mcp.json"));
+  } catch {
+    t.skip("cannot create symlinks here");
+    return;
+  }
+  file(".claude.json", json({ a: { type: "stdio", command: "npx" } }));
+  cli("sync", "claude", "cursor", "--apply");
+  assert.ok(lstatSync(join(home, ".cursor/mcp.json")).isSymbolicLink());
+  assert.ok("a" in JSON.parse(readFileSync(real, "utf8")).mcpServers);
+  if (process.platform !== "win32") assert.equal(statSync(real).mode & 0o777, 0o600);
 });
