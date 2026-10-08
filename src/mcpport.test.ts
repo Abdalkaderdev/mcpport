@@ -323,3 +323,15 @@ test("--help prints usage and never runs the command", () => {
   assert.match(text, /Usage:/);
   assert.ok(!existsSync(join(home, ".cursor/mcp.json")));
 });
+
+test("reads Gemini settings with comments and refuses to write them", () => {
+  file(".claude.json", json({ a: { type: "stdio", command: "npx" } }));
+  const text = '{\n  // servers\n  "mcpServers": { "b": { "command": "npx", "args": ["//x"] } } /* end */\n}\n';
+  file(".gemini/settings.json", text);
+  assert.equal(server("gemini", "b").args[0], "//x");
+  file(".cursor/mcp.json", "\uFEFF" + json({ c: { command: "npx" } }));
+  assert.equal(server("cursor", "c").command, "npx");
+  assert.equal(cli("lint", "--agent", "gemini").code, 0);
+  assert.throws(() => cli("sync", "claude", "gemini", "--apply"), /comments/);
+  assert.equal(read(".gemini/settings.json"), text);
+});

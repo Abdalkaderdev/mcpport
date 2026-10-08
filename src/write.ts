@@ -1,7 +1,7 @@
 import { copyFileSync, mkdirSync, readFileSync, renameSync, writeFileSync } from "node:fs";
 import { dirname } from "node:path";
 import { parse as parseToml, stringify as stringifyToml } from "smol-toml";
-import { canonical, parseDocument, type Config, type Server } from "./config.ts";
+import { canonical, parseDocument, stripComments, type Config, type Server } from "./config.ts";
 
 export type Action = "new" | "same" | "conflict" | "overwrite" | "invalid";
 
@@ -48,6 +48,7 @@ export function writeServers(target: Config, entries: [string, Record<string, un
   const eol = text.includes("\r\n") ? "\r\n" : "\n";
   let next: string;
   if (target.agent.format === "json") {
+    if (stripComments(text) !== text.replace(/^\uFEFF/, "")) throw new Error(`refusing to write ${target.path}: it has comments, which would be lost`);
     const doc = parseDocument(target.agent, text);
     const servers = (doc.mcpServers ??= {}) as Record<string, unknown>;
     for (const [name, value] of entries) servers[name] = value;

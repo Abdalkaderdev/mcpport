@@ -159,8 +159,11 @@ export function parseServer(agent: string, name: string, raw: unknown, scope?: s
   return { agent, name, scope, ...rest, extra: Object.keys(raw).filter((k) => !keys.includes(k)), raw, problems };
 }
 
+export const stripComments = (text: string) =>
+  text.replace(/^\uFEFF/, "").replace(/("(?:\\.|[^"\\])*")|\/\/[^\n]*|\/\*[\s\S]*?\*\//g, (m, s?: string) => s ?? "");
+
 export function parseDocument(agent: Agent, text: string): Raw {
-  text = text.replace(/^﻿/, "");
+  text = text.replace(/^\uFEFF/, "");
   if (agent.format === "toml") {
     try {
       return parseToml(text) as Raw;
@@ -170,7 +173,7 @@ export function parseDocument(agent: Agent, text: string): Raw {
   }
   if (!text.trim()) return {};
   try {
-    const doc = JSON.parse(text);
+    const doc = JSON.parse(stripComments(text));
     if (!isObject(doc)) throw new Error("top level is not an object");
     return doc;
   } catch (e) {
@@ -204,7 +207,7 @@ export function readConfig(agent: Agent, home: string, project?: string): Config
       const servers = doc[serversKey(agent)] ?? {};
       if (!isObject(servers)) throw new Error(`${serversKey(agent)} is not an object`);
       config.servers = Object.entries(servers).map(([name, raw]) => parseServer(agent.id, name, raw));
-      if (agent.format === "json") config.duplicates = duplicateKeys(text.replace(/^﻿/, ""), serversKey(agent));
+      if (agent.format === "json") config.duplicates = duplicateKeys(stripComments(text), serversKey(agent));
       if (agent.id === "claude" && !project) config.servers.push(...localServers(doc));
     } catch (e) {
       config.error = (e as Error).message;
