@@ -7,7 +7,7 @@ export type Action = "new" | "same" | "conflict" | "overwrite" | "invalid";
 
 export function plan(server: Server, target: Config, force: boolean): Action {
   if (server.problems.length) return "invalid";
-  const current = target.servers.find((s) => s.name === server.name);
+  const current = target.servers.find((s) => s.name === server.name && !s.scope);
   if (!current) return "new";
   if (canonical(current) === canonical(server)) return "same";
   return force ? "overwrite" : "conflict";

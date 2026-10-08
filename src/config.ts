@@ -1,5 +1,5 @@
 import { existsSync, readFileSync } from "node:fs";
-import { join } from "node:path";
+import { join, resolve } from "node:path";
 import { parse as parseToml, stringify as stringifyToml } from "smol-toml";
 
 export type Transport = "stdio" | "http" | "sse";
@@ -33,6 +33,7 @@ export function configPath(agent: Agent, home: string, project?: string): string
 export interface Server {
   agent: string;
   name: string;
+  scope?: string;
   transport: Transport;
   command?: string;
   args: string[];
@@ -52,6 +53,7 @@ export interface Config {
   servers: Server[];
   duplicates: string[];
   error?: string;
+  localError?: string;
 }
 
 export const REF = /\$\{([A-Za-z_][A-Za-z0-9_]*)(?::-([^}]*))?\}/g;
@@ -148,13 +150,13 @@ const PARSERS: Record<string, (raw: Raw) => Parsed> = {
   },
 };
 
-export function parseServer(agent: string, name: string, raw: unknown): Server {
+export function parseServer(agent: string, name: string, raw: unknown, scope?: string): Server {
   if (!isObject(raw)) {
-    return { agent, name, transport: "stdio", args: [], env: {}, headers: {}, extra: [], raw: {}, problems: ["entry is not an object"] };
+    return { agent, name, scope, transport: "stdio", args: [], env: {}, headers: {}, extra: [], raw: {}, problems: ["entry is not an object"] };
   }
   const { keys, problems = [], ...rest } = PARSERS[agent](raw);
   if (!rest.command && !rest.url) problems.push("has neither command nor url");
-  return { agent, name, ...rest, extra: Object.keys(raw).filter((k) => !keys.includes(k)), raw, problems };
+  return { agent, name, scope, ...rest, extra: Object.keys(raw).filter((k) => !keys.includes(k)), raw, problems };
 }
 
 export function parseDocument(agent: Agent, text: string): Raw {
@@ -178,28 +180,62 @@ export function parseDocument(agent: Agent, text: string): Raw {
 
 export const serversKey = (agent: Agent) => (agent.format === "toml" ? "mcp_servers" : "mcpServers");
 
+const samePath = (a: string, b: string) => {
+  const norm = (p: string) => resolve(p).replace(/\\/g, "/").replace(/\/+$/, "");
+  return process.platform === "win32" ? norm(a).toLowerCase() === norm(b).toLowerCase() : norm(a) === norm(b);
+};
+
+function localServers(doc: Raw, project?: string): Server[] {
+  if (!isObject(doc.projects)) return [];
+  return Object.entries(doc.projects).flatMap(([dir, p]) =>
+    (project && !samePath(dir, project)) || !isObject(p) || !isObject(p.mcpServers)
+      ? []
+      : Object.entries(p.mcpServers).map(([name, raw]) => parseServer("claude", name, raw, dir)),
+  );
+}
+
 export function readConfig(agent: Agent, home: string, project?: string): Config {
   const path = configPath(agent, home, project);
   const config: Config = { agent, path, exists: existsSync(path), servers: [], duplicates: [] };
-  if (!config.exists) return config;
-  const text = readFileSync(path, "utf8");
-  let doc: Raw;
-  try {
-    doc = parseDocument(agent, text);
-  } catch (e) {
-    config.error = (e as Error).message;
-    return config;
+  if (config.exists) {
+    const text = readFileSync(path, "utf8");
+    try {
+      const doc = parseDocument(agent, text);
+      const servers = doc[serversKey(agent)] ?? {};
+      if (!isObject(servers)) throw new Error(`${serversKey(agent)} is not an object`);
+      config.servers = Object.entries(servers).map(([name, raw]) => parseServer(agent.id, name, raw));
+      if (agent.format === "json") config.duplicates = duplicateKeys(text.replace(/^﻿/, ""), serversKey(agent));
+      if (agent.id === "claude" && !project) config.servers.push(...localServers(doc));
+    } catch (e) {
+      config.error = (e as Error).message;
+    }
   }
-  const servers = doc[serversKey(agent)];
-  if (servers === undefined) return config;
-  if (!isObject(servers)) {
-    config.error = `${serversKey(agent)} is not an object`;
-    return config;
+  const user = join(home, agent.file);
+  if (agent.id === "claude" && project && existsSync(user)) {
+    try {
+      config.servers.push(...localServers(parseDocument(agent, readFileSync(user, "utf8")), project));
+    } catch (e) {
+      config.localError = `${user}: ${(e as Error).message}`;
+    }
   }
-  config.servers = Object.entries(servers).map(([name, raw]) => parseServer(agent.id, name, raw));
-  if (agent.format === "json") config.duplicates = duplicateKeys(text.replace(/^﻿/, ""), serversKey(agent));
   return config;
 }
+
+export function effective(config: Config, project?: string): { servers: Server[]; ambiguous: string[] } {
+  const servers: Server[] = [];
+  const ambiguous: string[] = [];
+  for (const [name, copies] of Map.groupBy(config.servers, (s) => s.name)) {
+    const local = copies.filter((s) => s.scope);
+    const plain = copies.filter((s) => !s.scope);
+    if (project) servers.push([...local, ...plain][0]);
+    else if (plain.length) servers.push(plain[0]);
+    else if (new Set(local.map(canonical)).size > 1) ambiguous.push(name);
+    else servers.push(local[0]);
+  }
+  return { servers, ambiguous };
+}
+
+export const where = (s: Server) => (s.scope ? `${s.agent}:local ${s.scope}` : s.agent);
 
 export function readAll(home: string, agents: Agent[] = AGENTS, project?: string): Config[] {
   return agents.map((a) => readConfig(a, home, project));
