@@ -43,7 +43,7 @@ npx mcpport sync claude cursor --apply
 
 ## Commands
 
-The output below is from a sample home with four servers in Claude Code, three in Cursor, two in Codex and one in Gemini CLI.
+The output below is from a sample home with four user-scope servers and one local-scope server in Claude Code, three in Cursor, two in Codex and one in Gemini CLI.
 
 ### `list`
 
@@ -58,11 +58,12 @@ linear    http       https://mcp.linear.app/mcp                        yes    - 
 notion    http       https://mcp.notion.com/mcp                        -      -      -      yes
 postgres  stdio      postgres-mcp --dsn postgres://app:***@localho...  yes    -      -      -
 sentry    http       https://mcp.sentry.dev/mcp                        yes    -      -      yes
+stripe    http       https://mcp.stripe.com                            local  -      -      -      claude:local /Users/you/work/shop
 
-6 servers. claude: 4, codex: 2, gemini: 1, cursor: 3
+7 servers. claude: 4 + 1 local, codex: 2, gemini: 1, cursor: 3
 ```
 
-Copies are compared after normalizing each format, so `${GITHUB_TOKEN}` in Claude Code and `${env:GITHUB_TOKEN}` in Cursor count as the same. `off` marks a Codex server with `enabled = false`. Filter with `--agent <id>`, get redacted machine output with `--json`.
+Copies are compared after normalizing each format, so `${GITHUB_TOKEN}` in Claude Code and `${env:GITHUB_TOKEN}` in Cursor count as the same. `off` marks a Codex server with `enabled = false`. `local` marks a Claude Code local-scope server, shown on its own row with the directory it belongs to. Filter with `--agent <id>`, get redacted machine output with `--json`.
 
 ### `lint`
 
@@ -78,7 +79,7 @@ error  gemini/context7  defined more than once in ~\.gemini\settings.json; only 
 warn   cursor/github  references ${GITHUB_TOKEN}, which is not set
 warn   cursor/sentry  references ${SENTRY_TOKEN}, which is not set
 
-10 servers checked: 1 errors, 8 warnings
+11 servers checked: 1 errors, 8 warnings
 ```
 
 Errors:
@@ -95,7 +96,7 @@ Warnings:
 - a `${VAR}` reference without a default whose variable is not set in the current shell
 - names in one agent that differ only by case
 
-Exits 1 when there are errors.
+Issues in Claude Code local scope are labeled `claude:local <dir>`. Exits 1 when there are errors.
 
 ### `sync <from> <to>`
 
@@ -106,18 +107,20 @@ $ npx mcpport sync claude cursor
 conflict   github
 new        linear
 new        postgres
+new        stripe  (from claude:local /Users/you/work/shop)
 
-2 new, 0 overwrite, 1 conflicts (use --force), 0 invalid, 1 already in sync
+3 new, 0 overwrite, 1 conflicts (use --force), 0 invalid, 1 already in sync
 Dry run. Re-run with --apply to write ~\.cursor\mcp.json.
 
 $ npx mcpport sync claude cursor --apply
 conflict   github
 new        linear
 new        postgres
+new        stripe  (from claude:local /Users/you/work/shop)
 
-2 new, 0 overwrite, 1 conflicts (use --force), 0 invalid, 1 already in sync
+3 new, 0 overwrite, 1 conflicts (use --force), 0 invalid, 1 already in sync
 wrote ~\.cursor\mcp.json
-backup ~\.cursor\mcp.json.2026-10-08T00-03-39-468Z.bak
+backup ~\.cursor\mcp.json.2026-10-08T00-08-38-290Z.bak
 ```
 
 - dry run unless `--apply`
@@ -125,6 +128,7 @@ backup ~\.cursor\mcp.json.2026-10-08T00-03-39-468Z.bak
 - entries that fail lint's structural checks are reported as `invalid` and never copied
 - the target file is copied to `<file>.<timestamp>.bak` before it is written, and written through a temp file and rename
 - a target that does not parse is never written
+- Claude Code local-scope servers are read as a source, never written to
 
 ### `convert <server> --to <agent>`
 
@@ -183,7 +187,7 @@ Keys an agent doesn't understand (`startup_timeout_sec`, `trust`, `envFile`, ...
 
 | id       | user config              | project config (`--project <dir>`) | servers key              |
 |----------|--------------------------|------------------------------------|--------------------------|
-| `claude` | `~/.claude.json`         | `<dir>/.mcp.json`                  | `mcpServers`             |
+| `claude` | `~/.claude.json`, plus local scope `projects["<dir>"].mcpServers` (read only) | `<dir>/.mcp.json`, plus `projects["<dir>"]` (read only) | `mcpServers` |
 | `codex`  | `~/.codex/config.toml`   | `<dir>/.codex/config.toml`         | `[mcp_servers.<name>]`   |
 | `gemini` | `~/.gemini/settings.json`| `<dir>/.gemini/settings.json`      | `mcpServers`             |
 | `cursor` | `~/.cursor/mcp.json`     | `<dir>/.cursor/mcp.json`           | `mcpServers`             |
@@ -211,8 +215,14 @@ No. `list`, `lint`, `convert` without `--apply`/`--out`, and `sync` without `--a
 **Will it print my tokens?**
 No. Env and header values that are not pure variable references print as `***`, as do values after secret-looking flags, URL passwords and secret-looking query parameters. This applies to `--json` too. Only `--out` and `--apply` write real values, and only to disk.
 
-**Why is my Claude Code server missing from `list`?**
-`claude mcp add` defaults to local scope, which lives under `projects["<path>"].mcpServers` in `~/.claude.json`. mcpport reads the user scope (top-level `mcpServers`) and, with `--project`, the project's `.mcp.json`. Local scope is on the roadmap.
+**What does `claude:local <dir>` mean?**
+`claude mcp add` defaults to local scope: the server is stored under `projects["<dir>"].mcpServers` in `~/.claude.json` and only loads in that directory. mcpport lists and lints these as their own rows. `sync` and `convert` can copy them out, but never write into local scope: Claude Code targets get the user scope (top-level `mcpServers`), or `.mcp.json` with `--project`.
+
+**Can I move a local server to user scope?**
+`mcpport convert <server> --from claude --to claude --apply`. The local entry stays where it is.
+
+**The same local server name exists in several projects. Which one does `sync` copy?**
+A user-scope server with that name wins. Otherwise, if every local copy is identical it is copied, and if they differ it is skipped and reported. With `--project <dir>` only that directory's local entries are read, and they take precedence over `.mcp.json`, matching Claude Code's order.
 
 **Will it reformat my `~/.claude.json`?**
 It is rewritten with 2-space indentation, which is how Claude Code writes it. Key order and every non-MCP key are kept. CRLF files stay CRLF.
@@ -222,7 +232,8 @@ Some definitions cannot be expressed in the target format, for example an env va
 
 ## Roadmap
 
-- Claude Code local scope (`projects[...]` in `~/.claude.json`)
+- pick one project's copy when a local-scope name differs between projects
+- write to Claude Code local scope
 - more agents: VS Code, Windsurf, Zed, Claude Desktop
 - `diff <server>` between two agents' copies
 - `lint --fix` to move plaintext secrets into env var references
