@@ -58,7 +58,7 @@ test("normalizes all four formats to one shape", () => {
   ].join("\n"));
 
   const configs = readAll(home);
-  assert.deepEqual(configs.map((c) => c.servers.map((s) => s.name).join(",")), ["gh,api", "gh,api", "gh,api,old", "gh,api"]);
+  assert.deepEqual(configs.map((c) => c.servers.map((s) => s.name).join(",")), ["gh,api,local", "gh,api", "gh,api,old", "gh,api"]);
   assert.equal(server("gemini", "old").transport, "sse");
   assert.equal(server("codex", "api").transport, "http");
   assert.deepEqual(server("codex", "api").extra, ["startup_timeout_sec"]);
@@ -67,7 +67,7 @@ test("normalizes all four formats to one shape", () => {
   assert.match(out.text, /^gh\s+stdio\s+npx -y gh\s+yes\s+yes\s+yes\s+yes$/m);
   assert.match(out.text, /^api\s+http\s+https:\/\/a\.dev\/mcp\s+yes\s+yes\s+yes\s+yes$/m);
   assert.match(out.text, /^old\s+sse/m);
-  assert.doesNotMatch(out.text, /local/);
+  assert.match(out.text, /^local\s+stdio\s+x\s+local\s+-\s+-\s+-\s+claude:local \/x$/m);
 });
 
 test("list marks drift between agents", () => {
@@ -247,4 +247,55 @@ test("project mode reads .mcp.json and project agent dirs", () => {
   cli("sync", "claude", "cursor", "--project", project, "--apply");
   assert.ok(existsSync(join(project, ".cursor/mcp.json")));
   assert.ok(!existsSync(join(home, ".cursor/mcp.json")));
+});
+
+const localHome = () =>
+  file(".claude.json", json({ shared: { type: "stdio", command: "npx", args: ["user"] } }, {
+    projects: {
+      "C:/work/app": { mcpServers: { sentry: { type: "http", url: "https://mcp.sentry.dev/mcp" }, shared: { type: "stdio", command: "npx", args: ["local"] }, split: { type: "stdio", command: "a" } } },
+      "C:/work/api": { mcpServers: { leak: { type: "http", url: "https://a.dev/mcp", headers: { Authorization: `Bearer ${SECRET}` } }, split: { type: "stdio", command: "b" } } },
+      "C:/work/empty": { allowedTools: [] },
+    },
+  }));
+
+test("lists and lints Claude Code local scope with a scope marker", () => {
+  localHome();
+  const list = cli("list").text;
+  assert.match(list, /^sentry\s+http\s+https:\/\/mcp\.sentry\.dev\/mcp\s+local\s+claude:local C:\/work\/app$/m);
+  assert.match(list, /^shared\s+stdio\s+npx user\s+yes$/m);
+  assert.match(list, /^shared\s+stdio\s+npx local\s+local\s+claude:local C:\/work\/app$/m);
+  assert.match(list, /claude: 1 \+ 5 local/);
+  assert.ok(!list.includes(SECRET));
+  assert.ok(!cli("list", "--json").text.includes(SECRET));
+  const lint = cli("lint").text;
+  assert.match(lint, /^warn\s+claude:local C:\/work\/api leak\s+plaintext secret in header "Authorization"/m);
+  assert.ok(!lint.includes(SECRET));
+});
+
+test("sync and convert read local scope but write only to user scope", () => {
+  const claude = localHome();
+  const before = JSON.parse(readFileSync(claude, "utf8")).projects;
+  const out = cli("sync", "claude", "cursor", "--apply");
+  assert.match(out.text, /^new\s+sentry\s+\(from claude:local C:\/work\/app\)$/m);
+  assert.match(out.text, /^skip\s+split\s+\(local in several projects with different settings\)$/m);
+  assert.deepEqual(JSON.parse(read(".cursor/mcp.json")).mcpServers.shared.args, ["user"]);
+
+  assert.throws(() => cli("convert", "split", "--to", "cursor"), /several projects/);
+  assert.equal(cli("convert", "sentry", "--from", "claude", "--to", "claude", "--apply").code, 0);
+  const doc = JSON.parse(readFileSync(claude, "utf8"));
+  assert.deepEqual(doc.mcpServers.sentry, { type: "http", url: "https://mcp.sentry.dev/mcp" });
+  assert.deepEqual(doc.projects, before);
+});
+
+test("project mode reads that project's local scope first and writes .mcp.json", () => {
+  const project = join(home, "app");
+  mkdirSync(project);
+  writeFileSync(join(project, ".mcp.json"), json({ shared: { type: "stdio", command: "npx", args: ["project"] } }));
+  file(".claude.json", json({}, { projects: { [project.replace(/\\/g, "/")]: { mcpServers: { shared: { type: "stdio", command: "npx", args: ["local"] } } }, "/other": { mcpServers: { other: { command: "x" } } } } }));
+  assert.doesNotMatch(cli("list", "--project", project).text, /other/);
+  cli("sync", "claude", "cursor", "--project", project, "--apply");
+  assert.deepEqual(JSON.parse(readFileSync(join(project, ".cursor/mcp.json"), "utf8")).mcpServers.shared.args, ["local"]);
+  cli("convert", "shared", "--from", "claude", "--to", "claude", "--project", project, "--apply", "--force");
+  assert.deepEqual(JSON.parse(readFileSync(join(project, ".mcp.json"), "utf8")).mcpServers.shared.args, ["local"]);
+  assert.ok(!JSON.parse(read(".claude.json")).mcpServers.shared);
 });
