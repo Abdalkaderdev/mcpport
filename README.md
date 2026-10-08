@@ -128,6 +128,7 @@ backup ~\.cursor\mcp.json.2026-10-08T00-08-38-290Z.bak
 - entries that fail lint's structural checks are reported as `invalid` and never copied
 - the target file is copied to `<file>.<timestamp>.bak` before it is written, and written through a temp file and rename
 - a target that does not parse is never written
+- a JSON target with comments (Gemini CLI allows them) is read but never written, since the rewrite would drop them
 - Claude Code local-scope servers are read as a source, never written to
 
 ### `convert <server> --to <agent>`

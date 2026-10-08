@@ -1,6 +1,6 @@
 {
   "name": "mcpport",
-  "version": "0.1.0",
+  "version": "0.1.1",
   "description": "List, lint, sync and convert MCP server configs across Claude Code, Codex, Gemini CLI and Cursor",
   "keywords": [
     "mcp",
