@@ -299,3 +299,19 @@ test("project mode reads that project's local scope first and writes .mcp.json",
   assert.deepEqual(JSON.parse(readFileSync(join(project, ".mcp.json"), "utf8")).mcpServers.shared.args, ["local"]);
   assert.ok(!JSON.parse(read(".claude.json")).mcpServers.shared);
 });
+
+test("redacts secrets in env-style, header-style and --key args", () => {
+  const args = ["-e", `GITHUB_TOKEN=${SECRET}`, "--header", `Authorization: Bearer ${SECRET}`, "--key", SECRET, "X_TOKEN=${X_TOKEN}", `--header=Authorization: Bearer ${SECRET}`];
+  const out = redactArgs(args);
+  assert.ok(!out.join(" ").includes(SECRET), out.join(" "));
+  assert.deepEqual(out, ["-e", "GITHUB_TOKEN=***", "--header", "Authorization: Bearer ***", "--key", "***", "X_TOKEN=${X_TOKEN}", "--header=Authorization: Bearer ***"]);
+  file(".claude.json", json({ gh: { type: "stdio", command: "npx", args: ["-e", `GITHUB_TOKEN=${SECRET}`] } }));
+  assert.match(cli("lint").text, /plaintext secret in args/);
+});
+
+test("convert within one agent redacts nested secrets", () => {
+  file(".gemini/settings.json", json({ g: { httpUrl: "https://g.dev/mcp", oauth: { enabled: true, clientSecret: SECRET } } }));
+  const { text } = cli("convert", "g", "--from", "gemini", "--to", "gemini");
+  assert.ok(!text.includes(SECRET), text);
+  assert.match(cli("convert", "g", "--from", "gemini", "--to", "codex").text, /bearer|url/);
+});

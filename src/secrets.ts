@@ -18,10 +18,12 @@ export function redactUrl(url: string): string {
 
 export function redactArgs(args: string[]): string[] {
   return args.map((arg, i) => {
-    const eq = arg.match(/^(--?[\w.-]+)=(.*)$/);
-    if (eq) return SECRET_NAME.test(eq[1]) ? `${eq[1]}=${mask(eq[2])}` : redactUrl(arg);
+    const eq = arg.match(/^(-{0,2}[\w.-]+)=(.*)$/s);
+    if (eq) return SECRET_NAME.test(eq[1].replace(/^-+/, "")) ? `${eq[1]}=${mask(eq[2])}` : `${eq[1]}=${redactArgs([eq[2]])[0]}`;
+    const header = arg.match(/^([\w-]+):\s*(.*)$/s);
+    if (header && (SECRET_NAME.test(header[1]) || SCHEME.test(header[2]))) return `${header[1]}: ${mask(header[2])}`;
     const prev = args[i - 1];
-    if (prev && /^--?[\w.-]+$/.test(prev) && SECRET_NAME.test(prev) && !arg.startsWith("-")) return mask(arg);
+    if (prev && /^--?[\w.-]+$/.test(prev) && SECRET_NAME.test(prev.replace(/^-+/, "")) && !arg.startsWith("-")) return mask(arg);
     return redactUrl(arg);
   });
 }
@@ -30,8 +32,8 @@ const VALUE_MAPS = new Set(["env", "headers", "http_headers"]);
 
 export function redact(value: unknown, key = ""): unknown {
   if (Array.isArray(value)) return key === "args" ? redactArgs(value.map(String)) : value.map((v) => redact(v));
-  if (typeof value === "string") return /url$/i.test(key) ? redactUrl(value) : value;
-  if (typeof value !== "object" || value === null) return value;
+  if (typeof value === "string") return /url$/i.test(key) ? redactUrl(value) : SECRET_NAME.test(key) && !/env_var$/.test(key) ? mask(value) : value;
+  if (typeof value !== "object" || value === null || key === "env_http_headers") return value;
   return Object.fromEntries(
     Object.entries(value).map(([k, v]) => [k, VALUE_MAPS.has(key) && typeof v === "string" ? mask(v) : redact(v, k)]),
   );
